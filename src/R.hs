@@ -16,7 +16,7 @@ data RC
   | Em RE
 
 data RE
-  = A :^ Int
+  = A :# Int
   | RE :$ RC
   | RC :< RC
 
@@ -43,8 +43,8 @@ tD (c :. d)   = T.concat [" ", tC c, tD d]
 tD c          = T.concat [", ", tC c]
 
 tE :: RE -> Text
-tE (x :^ 0) = x
-tE (x :^ i) = T.concat [x, "^", T.pack (show i)]
+tE (x :# 0) = x
+tE (x :# i) = T.concat [x, "^", T.pack (show i)]
 tE (e :$ c) = T.concat [tE e, " ", tC c]
 tE (c :< d) = T.concat ["{", tC c, " : ", tC d, "}"]
 
@@ -71,7 +71,7 @@ pH :: P.Parser RE
 pH = (:<) <$ P.char '{' <* skipSpace <*> pC <* skipSpace <*
              P.char ':' <* skipSpace <*> pC <* skipSpace <*
              P.char '}'
- <|> (:^) <$> pA <*> (id <$ P.char '^' <*> decimal <|> pure 0)
+ <|> (:#) <$> pA <*> (id <$ P.char '^' <*> decimal <|> pure 0)
 
 pM :: RE -> P.Parser RE
 pM e = (((e :$) <$ skipSpace <*> pC) >>= pM) <|> pure e
