@@ -70,6 +70,11 @@ rtZ e g (t : ts) = do
   rtZ (fmap Z (pR e t)) g ts
 
 
+
+upsilon :: Re TE -> Re TC
+upsilon (T (t, _) :^ bi) = t ^<< bi
+upsilon e = fmap E e
+
 data HSub = HSub {leave :: OPE, subst :: OPE, images :: Bwd (Re (Bn TE))}
   deriving Show
 
@@ -97,7 +102,7 @@ instance HSUB TC where
   hsWk sb (I t)  = fmap I (hs sb t)
   hsWk sb (P st) = fmap P (hs sb st)
   hsWk sb (L t)  = fmap L (hs sb t)
-  hsWk sb (E e)  = fmap E (hs sb e)
+  hsWk sb (E e)  = upsilon (hs sb e)
 
 instance HSUB TE where
   hsWk sb (X (() :^ x, sp :^ ai)) = case x <% sb of

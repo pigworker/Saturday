@@ -95,6 +95,9 @@ pR :: Re s -> Re t -> Re (PR s t)
 pR (s :^ ai) (t :^ bi) = (s :^ ai', t :^ bi') :^ (ai .|. bi) where
   (ai', bi') = psh ai bi
 
+prjR :: Re (PR s t) -> (Re s, Re t)
+prjR ((s, t) :^ ci) = (s ^<< ci, t ^<< ci)
+
 xR :: Int -> Re ()
 xR i = () :^ B (bit i)
 
