@@ -1,8 +1,9 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, FlexibleInstances, TypeSynonymInstances #-}
 
 module Tm where
 
 import Control.Arrow ((***))
+import Data.Bits
 import R
 import B
 
@@ -16,7 +17,7 @@ data TC
   deriving Show
 
 data TE
-  = X (PR () (Sp (Bn TC)))
+  = X (PR () (Sp (Bn TE)))
   | Z (PR TE TC)
   | T (PR TC TC)
   deriving Show
@@ -50,15 +51,15 @@ rtE g (x :# i) ts = do
   (j, Ki ks) <- rtX g x i
   rtS (xR j) (kR S0) g ks ts
 
-rtS :: Re () -> Re (Sp (Bn TC)) -> Bwd (A, Ki) -> [Ki] -> [RC] -> Maybe (Re TE)
+rtS :: Re () -> Re (Sp (Bn TE)) -> Bwd (A, Ki) -> [Ki] -> [RC] -> Maybe (Re TE)
 rtS x tz g [] ts = rtZ (fmap X (pR x tz)) g ts
-rtS x tz g (k : ks) [] = Nothing
 rtS x tz g (Ki k : ks) (t : ts) = do
   t <- rtB g 0 k t
   rtS x (tz -\ t) g ks ts
+rtS _ _ _ _ _ = Nothing
 
-rtB :: Bwd (A, Ki) -> Int -> [Ki] -> RC -> Maybe (Re (Bn TC))
-rtB g n [] t = (n \\) <$> rtC g t
+rtB :: Bwd (A, Ki) -> Int -> [Ki] -> RC -> Maybe (Re (Bn TE))
+rtB g n [] (Em e) = (n \\) <$> rtE g e []
 rtB g n (k : ks) (Ld x t) = rtB (g :\ (x, k)) (n + 1) ks t
 rtB _ _ _ _ = Nothing
 
@@ -68,3 +69,48 @@ rtZ e g (t : ts) = do
   t <- rtC g t
   rtZ (fmap Z (pR e t)) g ts
 
+
+data HSub = HSub {leave :: OPE, subst :: OPE, images :: Bwd (Re (Bn TE))}
+  deriving Show
+
+(<%) :: OPE -> HSub -> HSub
+bi <% HSub th ps sz = HSub (th0 << th) bi0 (ps0 <?? sz) where
+  (bi0, ps0) = pll bi ps
+  (_, th0)   = pll bi (complement ps)
+
+(%+) :: HSub -> (Int, OPE) -> HSub
+HSub th ps sz %+ (n, bi) = HSub (bins th n bi) (shiftL ps n) sz
+
+class HSUB t where
+  hs, hsWk :: HSub -> t -> Re t
+  hs (HSub bi _ B0) t = t :^ bi
+  hs sb t = hsWk sb t
+
+instance HSUB t => HSUB (Re t) where
+  hsWk sb (t :^ bi) = hs (bi <% sb) t :^ oi
+
+instance (HSUB s, HSUB t) => HSUB (PR s t) where
+  hs = hsWk
+  hsWk sb (s :^ ai, t :^ bi) = pR (hs (ai <% sb) s) (hs (bi <% sb) t)
+
+instance HSUB TC where
+  hsWk sb (I t)  = fmap I (hs sb t)
+  hsWk sb (P st) = fmap P (hs sb st)
+  hsWk sb (L t)  = fmap L (hs sb t)
+  hsWk sb (E e)  = fmap E (hs sb e)
+
+instance HSUB TE where
+  hsWk sb (X (() :^ x, sp :^ ai)) = case x <% sb of
+    HSub y _ B0  -> fmap X (pR (() :^ y) sp')
+    HSub _ _ (_ :\ (((n, bi) :\\ t) :^ th)) ->
+      hs (HSub th (bins oe (bi <? n) oi) (bi <?? unSp sp')) t
+   where
+    sp' = hs (ai <% sb) sp
+  hsWk sb (Z et) = fmap Z (hs sb et)
+  hsWk sb (T tT) = fmap T (hs sb tT)
+
+instance HSUB t => HSUB (Sp t) where
+  hsWk sb (SZ p) = fmap SZ (hs sb p)
+
+instance HSUB t => HSUB (Bn t) where
+  hsWk sb (p@(n, _) :\\ e) = n \\ hs (sb %+ p) e

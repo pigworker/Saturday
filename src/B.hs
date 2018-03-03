@@ -33,6 +33,9 @@ bout (B i) = (B (shiftR i 1), testBit i 0)
 bouts :: Int -> OPE -> (OPE, OPE)
 bouts n (B i) = (B (shiftR i n), (B (i .&. (2 ^ n - 1))))
 
+bins :: OPE -> Int -> OPE -> OPE
+bins ai n bi = shiftL ai n .|. (bi .&. B (2 ^ n - 1))
+
 oe, oi :: OPE
 oe = B 0
 oi = B (-1)
@@ -74,20 +77,23 @@ instance Functor Re where
 kR :: x -> Re x
 kR x = x :^ oe
 
-cop :: OPE -> OPE -> (OPE, OPE)
-cop (B (-1)) bi = (oi, bi)
-cop ai (B (-1)) = (ai, oi)
-cop (B 0)    bi = (oe, oi)
-cop ai    (B 0) = (oi, oe)
-cop ai       bi = case (bout ai, bout bi) of
+jR :: Re (Re t) -> Re t
+jR ((t :^ ai) :^ bi) = t :^ (ai << bi)
+
+psh :: OPE -> OPE -> (OPE, OPE)
+psh (B (-1)) bi = (oi, bi)
+psh ai (B (-1)) = (ai, oi)
+psh (B 0)    bi = (oe, oi)
+psh ai    (B 0) = (oi, oe)
+psh ai       bi = case (bout ai, bout bi) of
   ((ai, a), (bi, b)) ->
-    (if a || b then (<\ a) *** (<\ b) else id) (cop ai bi)
+    (if a || b then (<\ a) *** (<\ b) else id) (psh ai bi)
 
 type PR s t = (Re s, Re t)
 
 pR :: Re s -> Re t -> Re (PR s t)
 pR (s :^ ai) (t :^ bi) = (s :^ ai', t :^ bi') :^ (ai .|. bi) where
-  (ai', bi') = cop ai bi
+  (ai', bi') = psh ai bi
 
 xR :: Int -> Re ()
 xR i = () :^ B (bit i)
@@ -98,10 +104,24 @@ n \\ (t :^ ci) = ((n, bi) :\\ t) :^ ai where (ai, bi) = bouts n ci
 
 data Sp x = S0 | SZ (PR (Sp x) x) deriving Show
 
-(-\) :: Re (Sp x) -> Re x -> Re (Sp x)
-xz -\ x = fmap SZ (pR xz x)
-
 unSp :: Re (Sp x) -> Bwd (Re x)
 unSp (S0 :^ _) = B0
 unSp (SZ (xz, x) :^ ci) = unSp (xz ^<< ci) :\ (x ^<< ci)
 
+(-\) :: Re (Sp x) -> Re x -> Re (Sp x)
+xz -\ x = fmap SZ (pR xz x)
+
+sp :: Bwd (Re x) -> Re (Sp x)
+sp B0        = kR S0
+sp (xz :\ x) = sp xz -\ x
+
+pll :: OPE -> OPE -> (OPE, OPE)
+pll (B (-1)) bi = (bi, oi)
+pll ai (B (-1)) = (oi, ai)
+pll (B 0)    bi = (oe, oe)
+pll ai    (B 0) = (oe, oe)
+pll ai       bi = case (bout ai, bout bi) of
+  ((ai, True),   (bi, True))    -> (os *** os) (pll ai bi)
+  ((ai, True),   (bi, False))   -> (o' *** id) (pll ai bi)
+  ((ai, False),  (bi, True))    -> (id *** o') (pll ai bi)
+  ((ai, False),  (bi, False))   -> pll ai bi
