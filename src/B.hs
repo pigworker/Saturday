@@ -36,6 +36,9 @@ bouts n i = (shiftR i n, i .&. (2 ^ n - 1))
 bins :: OPE -> Int -> OPE -> OPE
 bins ai n bi = shiftL ai n .|. (bi .&. (2 ^ n - 1))
 
+qOPE :: Int -> OPE -> OPE -> Bool
+qOPE n i j = (i .&. m) == (j .&. m) where m = 2 ^ n - 1
+
 oe, oi :: OPE
 oe = 0
 oi = (-1)
@@ -104,6 +107,9 @@ xR i = () :^ bit i
 data Bn t =  (Int, OPE) :\\ t deriving Show
 (\\) :: Int -> Re t -> Re (Bn t)
 n \\ (t :^ ci) = ((n, bi) :\\ t) :^ ai where (ai, bi) = bouts n ci
+
+body :: Re (Bn t) -> Re t
+body (((n, bi) :\\ t) :^ ai) = t :^ bins ai n bi
 
 data Sp x = S0 | SZ (PR (Sp x) x) deriving Show
 
