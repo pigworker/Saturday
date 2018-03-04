@@ -86,6 +86,20 @@ a thinning gives us about variables which aren't in scope, so we must
 identify them up to their least *n* significant bits when there are
 *n* variables in scope.
 
+The operation
+
+    (<?) :: OPE -> Int -> Int
+
+computes the number of variables in the domain of a thinning (or how
+may are not expelled), given how many there are in the range. Its
+friend
+
+    (<??) :: OPE -> Bwd x -> Bwd x
+
+computes the selection of a snoc-list given by a thinning. Morally,
+that extends vectors to a contravariant functor from thinnings to
+Set (i.e. an embedding from n to m tells you how to choose n things from m).
+
 Two's complement representation now comes in handy: -1 is the identity
 thinning (`oi`), with all bits set; 0 is the empty thinning (`oe`),
 discarding all variables. Thinnings are extended by two operations
@@ -104,7 +118,7 @@ means 'move the next bit from &theta;'.
 
 We then do a lot of work with the type of *relevant* things
 
-     data Re t = t :^ OPE deriving Show
+    data Re t = t :^ OPE deriving Show
 
 where *t* `:^` &theta; is intended to store *t*s which are sure to
 use all of the variables that &theta; has not thrown away.
@@ -197,8 +211,145 @@ Constructions are as follows,
 defined mutually with eliminations
 
     data TE
-      = X (PR () (Sp (Bn TE)))   -- use of variable, with spine of parameters
+      = X (PR () (Sp (Bn TE)))   -- use of (meta)variable, with spine of parameters
       | Z (PR TE TC)             -- zapping something with an eliminator
       | T (PR TC TC)             -- type annotation   {term : Type}
       deriving Show
+
+The next step is to define the extraction of relevant terms from raw
+terms. Now, in Constructive Engine style, that ought to be done at the
+same time as typechecking. That's to say, we should represent only
+trusted terms in the abstract syntax. But I'm a wrong'un in a hurry.
+All that's needed to fuel the construction is the names (and parameter
+info) for the (meta)variables in scope.
+
+I should say something about metavariables and spines. The *object*
+variables of the calculus, bound with `L`, are usable as eliminations
+with an empty spine. However, this syntax also allows us to invoke
+*meta*variables, which live at the global end of scope and will be
+bound by the *proof state*. Metavariables can be hereditarily
+parametrised, and their parameters must be instantiated at usage
+sites, which is why variables take a spine.
+
+Making object variables the boring special case of metavariables means
+that we may use the same machinery (*hereditary substitution*) for
+hole-filling as well as for yer basic &beta;-reduction.
+
+
+## Simultaneous Hereditary Substitution
+
+In [B.hs](src/B.hs), I define a notion of
+morphism from a source scope to a target scope, keeping track of
+
+* which source variables are being overwritten
+* which target terms are overwriting them
+* how to embed the left variables into the target scope
+
+But not necessarily in that order (as I keep the left variables to the left):
+
+    data Morph t = Morph {left :: OPE, write :: OPE, images :: Bwd (Re t)}
+      deriving Show
+
+Now, we can refine a substitution down to those source variables which
+survive a thinning.
+
+    (<%) :: OPE -> Morph t -> Morph t
+    bi <% Morph th ps sz = Morph (th0 << th) bi0 (ps0 <?? sz) where
+      (bi0, ps0) = pll bi ps
+      (_, th0)   = pll bi (complement ps)
+
+Here we make key use of the fact that thinnings have *pullbacks*.
+
+    pll :: OPE -> OPE -> (OPE, OPE)
+
+computes the embedding into two subscopes from their intersection,
+which tells you how to thin the variables which remain for thinning
+and which substitution images can be thrown away. The `<??` operator
+treats a thinning as a selection from a snoc-list.
+
+The other key operation we need on substitutions is to push them
+under a binder.
+
+    (%+) :: Morph t -> (Int, OPE) -> Morph t
+    Morph th ps sz %+ (n, bi) =
+      Morph (bins th n bi) (shiftL ps (bi <? n)) (fmap (wks n) sz)
+
+We're going under `n` binders, so we have `n` new target variables,
+and `bi` tells us which of them are actually used in the source term
+under the binder. We need to thin all our images by `n`:
+    
+    wks :: Int -> Re t -> Re t
+    wks n (t :^ bi) = t :^ shiftL bi n
+
+We need to left-shift the `write` selector by the number of new source
+variables, as none of them is being written. Correspondingly, we need
+to extend the thinning for the `left` variables into the target
+context with exactly the information from the binder.
+
+    bins :: OPE -> Int -> OPE -> OPE
+    bins ai n bi = shiftL ai n .|. (bi .&. (2 ^ n - 1))
+
+What's pleasing is that we've got as far as pushing morphisms under
+binders without saying anything about the syntax at all. Unlike de
+Bruijn representations, we don't need to go all the way to the leaves
+to thin a substitution ready for use under a binder, because the
+substitution images carry a thinning at their root.
+
+Now we arrive in [Tm.hs](src/Tm.hs), and we choose substitution images
+to be binding forms, allowing metavariable instantiation to abstract
+over parameters.
+
+    type HSub = Morph (Bn TE)
+
+I introduce a type class for things which admit hereditary
+substitution, mostly to try to make each mistake only once.
+
+    class HSUB t where
+      hs, hsGo :: HSub -> t -> Re t
+      hs (Morph bi _ B0) t = t :^ bi
+      hs sb t = hsGo sb t
+
+Things to note:
+
+* The `t` being substituted should use everything in scope so the
+morphism should have no junk in it.
+* A substitution does not promise to use all the target variables
+available, so the output needs a `Re`.
+* Accordingly, we know that if *none* of the variables is being
+written, they are all being left, which we do by action at the
+root.
+* The wrapper `hs` tests for whether a substitution and calls the
+worker `hsGo` only if there is work to do.
+* Instances should define only `hsGo`. Recursive calls should be to
+`hs` if the scope gets smaller, but `hsGo` if it stays the same or
+grows under a binder: if we were hunting a free variable before,
+we still are, now.
+* Although it potentially avoids vast swaths of closed term, we are
+still proceeding at a trundle. The notorious *underground*
+representation might improve things, allowing us to barrel along a
+network of *tubes* (closed one-hole contexts) between the interesting
+choice points.
+
+The action is in the `TE` instance, and specifically in the `X` case
+
+    hsGo sb (X (() :^ x, sp :^ ai)) = case x <% sb of
+      Morph y _ B0         -> fmap X (pR (() :^ y) (hs (ai <% sb) sp))
+      Morph _ _ (_ :\ pv)  -> stan pv (hs (ai <% sb) sp)
+
+where we know that `x` is a singleton thinning, so refining the
+substitution by it will tell us pretty directly whether the variable
+gets substituted or not. If not, we have just the singleton we need
+to build the target. But if it's time to write, we need to turn the
+spine of (substituted) parameters into the hereditary substitution
+which instantiates the formal parameters if the image.
+
+    stan :: HSUB t => Re (Bn t) -> Re (Sp (Bn TE)) -> Re t
+    stan (((n, bi) :\\ t) :^ th) sp =
+      hs (Morph th (bins oe (bi <? n) oi) (bi <?? unSp sp)) t
+
+Now we're thinning the *free* variables and substituting the *bound*
+variables (having first turned the spine into a snoc-list and selected
+only those which are used in the image). Of course, if there are no
+parameters (or none are used), then `t` will not be traversed.
+
 

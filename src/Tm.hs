@@ -10,18 +10,18 @@ import R
 import B
 
 data TC
-  = A A
-  | V
-  | P (PR TC TC)
-  | I TC
-  | L (Bn TC)     -- never nullary, never nested
-  | E TE
+  = A A           -- atom
+  | V             -- void
+  | P (PR TC TC)  -- pair
+  | I TC          -- inductive wrapping
+  | L (Bn TC)     -- lambda, never nullary, never nested
+  | E TE          -- elimination
   deriving Show
 
 data TE
-  = X (PR () (Sp (Bn TE)))
-  | Z (PR TE TC)
-  | T (PR TC TC)
+  = X (PR () (Sp (Bn TE)))   -- use of variable, with spine of parameters
+  | Z (PR TE TC)             -- zapping something with an eliminator
+  | T (PR TC TC)             -- type annotation
   deriving Show
 
 data Ki = Ki [Ki]
@@ -77,53 +77,41 @@ upsilon :: Re TE -> Re TC
 upsilon (T (t, _) :^ bi) = t ^<< bi
 upsilon e = fmap E e
 
-data HSub = HSub {leave :: OPE, subst :: OPE, images :: Bwd (Re (Bn TE))}
-  deriving Show
-
-(<%) :: OPE -> HSub -> HSub
-bi <% HSub th ps sz = HSub (th0 << th) bi0 (ps0 <?? sz) where
-  (bi0, ps0) = pll bi ps
-  (_, th0)   = pll bi (complement ps)
-
-(%+) :: HSub -> (Int, OPE) -> HSub
-HSub th ps sz %+ (n, bi) = HSub (bins th n bi) (shiftL ps n) sz
+type HSub = Morph (Bn TE)
 
 class HSUB t where
-  hs, hsWk :: HSub -> t -> Re t
-  hs (HSub bi _ B0) t = t :^ bi
-  hs sb t = hsWk sb t
+  hs, hsGo :: HSub -> t -> Re t
+  hs (Morph bi _ B0) t = t :^ bi
+  hs sb t = hsGo sb t
 
 instance HSUB t => HSUB (Re t) where
-  hsWk sb (t :^ bi) = hs (bi <% sb) t :^ oi
+  hsGo sb (t :^ bi) = hs (bi <% sb) t :^ oi
 
 instance (HSUB s, HSUB t) => HSUB (PR s t) where
-  hs = hsWk
-  hsWk sb (s :^ ai, t :^ bi) = pR (hs (ai <% sb) s) (hs (bi <% sb) t)
+  hsGo sb (s :^ ai, t :^ bi) = pR (hs (ai <% sb) s) (hs (bi <% sb) t)
 
 instance HSUB TC where
-  hsWk sb (I t)  = fmap I (hs sb t)
-  hsWk sb (P st) = fmap P (hs sb st)
-  hsWk sb (L t)  = fmap L (hs sb t)
-  hsWk sb (E e)  = upsilon (hs sb e)
+  hsGo sb (I t)  = fmap I (hsGo sb t)
+  hsGo sb (P st) = fmap P (hsGo sb st)
+  hsGo sb (L t)  = fmap L (hsGo sb t)
+  hsGo sb (E e)  = upsilon (hsGo sb e)
 
 instance HSUB TE where
-  hsWk sb (X (() :^ x, sp :^ ai)) = case x <% sb of
-    HSub y _ B0  -> fmap X (pR (() :^ y) sp')
-    HSub _ _ (_ :\ pv) -> stan pv sp'
-   where
-    sp' = hs (ai <% sb) sp
-  hsWk sb (Z et) = fmap Z (hs sb et)
-  hsWk sb (T tT) = fmap T (hs sb tT)
+  hsGo sb (X (() :^ x, sp :^ ai)) = case x <% sb of
+    Morph y _ B0         -> fmap X (pR (() :^ y) (hs (ai <% sb) sp))
+    Morph _ _ (_ :\ pv)  -> stan pv (hs (ai <% sb) sp)
+  hsGo sb (Z et) = fmap Z (hsGo sb et)
+  hsGo sb (T tT) = fmap T (hsGo sb tT)
 
 stan :: HSUB t => Re (Bn t) -> Re (Sp (Bn TE)) -> Re t
 stan (((n, bi) :\\ t) :^ th) sp =
-  hs (HSub th (bins oe (bi <? n) oi) (bi <?? unSp sp)) t
+  hs (Morph th (bins oe (bi <? n) oi) (bi <?? unSp sp)) t
 
 instance HSUB t => HSUB (Sp t) where
-  hsWk sb (SZ p) = fmap SZ (hs sb p)
+  hsGo sb (SZ p) = fmap SZ (hsGo sb p)
 
 instance HSUB t => HSUB (Bn t) where
-  hsWk sb (p@(n, _) :\\ e) = n \\ hs (sb %+ p) e
+  hsGo sb (p@(n, _) :\\ e) = n \\ hsGo (sb %+ p) e
 
 
 ld :: Bn TC -> TC
@@ -236,9 +224,6 @@ can (Y t)      = t
 topSort :: Re TC
 topSort = can ("Type" :/ ["Type" :/ []])
 
-wk :: Re t -> Re t
-wk (t :^ bi) = t :^ o' bi
-
 chk :: Cx        -- context
     -> Re TC     -- type to check, already in rnf
     -> Re TC     -- candidate inhabitant
@@ -248,7 +233,7 @@ chk g ty tm@(t :^ bi) = case (isCan ty, isCan tm) of
   (Just ("Type", _), Just ("Pi", [sS, tT])) -> do
     bT <- isL1 tT
     chk g ty sS
-    pushCx g sS $ \ g x -> chk g (wk ty) (body bT)
+    pushCx g sS $ \ g x -> chk g (wks 1 ty) (body bT)
   (Just ("Pi", [sS, tT]), _) | Just bt <- isL1 tm -> do
     bT <- isL1 tT
     pushCx g sS $ \ g x -> chk g (rnfC g (body bT)) (body bt)
@@ -338,7 +323,8 @@ qC g ty t0 t1 = case (isCan ty, isCan t0, isCan t1) of
     qC g ty (rnfC g sS) (rnfC g tS)
     bsT <- isL1 sT
     btT <- isL1 tT
-    pushCx g sS $ \ g x -> qC g (wk ty) (rnfC g (body bsT)) (rnfC g (body btT))
+    pushCx g sS $ \ g x ->
+      qC g (wks 1 ty) (rnfC g (body bsT)) (rnfC g (body btT))
   (Just ty@("Pi", [sS, tT]), _, _) -> do
     bT <- isL1 tT
     b0 <- isL1 (etaPi t0)

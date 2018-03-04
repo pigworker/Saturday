@@ -71,6 +71,9 @@ bi   <?? (xz :\ x) = if b then yz :\ x else yz where
 
 data Re t = t :^ OPE deriving Show
 
+wks :: Int -> Re t -> Re t
+wks n (t :^ bi) = t :^ shiftL bi n
+
 instance Functor Re where
   fmap f (t :^ bi) = f t :^ bi
 
@@ -134,3 +137,16 @@ pll ai       bi = case (bout ai, bout bi) of
   ((ai, True),   (bi, False))   -> (o' *** id) (pll ai bi)
   ((ai, False),  (bi, True))    -> (id *** o') (pll ai bi)
   ((ai, False),  (bi, False))   -> pll ai bi
+
+data Morph t = Morph {left :: OPE, write :: OPE, images :: Bwd (Re t)}
+  deriving Show
+
+(<%) :: OPE -> Morph t -> Morph t
+bi <% Morph th ps sz = Morph (th0 << th) bi0 (ps0 <?? sz) where
+  (bi0, ps0) = pll bi ps
+  (_, th0)   = pll bi (complement ps)
+
+(%+) :: Morph t -> (Int, OPE) -> Morph t
+Morph th ps sz %+ (n, bi) =
+  Morph (bins th n bi) (shiftL ps (bi <? n)) (fmap (wks n) sz)
+
