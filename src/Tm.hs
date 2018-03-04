@@ -1,4 +1,5 @@
-{-# LANGUAGE OverloadedStrings, FlexibleInstances, TypeSynonymInstances #-}
+{-# LANGUAGE OverloadedStrings, FlexibleInstances, TypeSynonymInstances,
+    PatternGuards #-}
 
 module Tm where
 
@@ -12,7 +13,7 @@ data TC
   | V
   | P (PR TC TC)
   | I TC
-  | L (Bn TC)     -- never nullary
+  | L (Bn TC)     -- never nullary, never nested
   | E TE
   deriving Show
 
@@ -107,15 +108,106 @@ instance HSUB TC where
 instance HSUB TE where
   hsWk sb (X (() :^ x, sp :^ ai)) = case x <% sb of
     HSub y _ B0  -> fmap X (pR (() :^ y) sp')
-    HSub _ _ (_ :\ (((n, bi) :\\ t) :^ th)) ->
-      hs (HSub th (bins oe (bi <? n) oi) (bi <?? unSp sp')) t
+    HSub _ _ (_ :\ pv) -> stan pv sp'
    where
     sp' = hs (ai <% sb) sp
   hsWk sb (Z et) = fmap Z (hs sb et)
   hsWk sb (T tT) = fmap T (hs sb tT)
+
+stan :: HSUB t => Re (Bn t) -> Re (Sp (Bn TE)) -> Re t
+stan (((n, bi) :\\ t) :^ th) sp =
+  hs (HSub th (bins oe (bi <? n) oi) (bi <?? unSp sp)) t
 
 instance HSUB t => HSUB (Sp t) where
   hsWk sb (SZ p) = fmap SZ (hs sb p)
 
 instance HSUB t => HSUB (Bn t) where
   hsWk sb (p@(n, _) :\\ e) = n \\ hs (sb %+ p) e
+
+
+ld :: Bn TC -> TC
+ld ((0, _) :\\ t) = t
+ld ((n, ai) :\\ L ((m, bi) :\\ t)) = L ((n + m, bins ai m bi) :\\ t)
+ld b = L b
+
+isL1 :: Re TC -> Maybe (Re (Bn TC))
+isL1 (L ((0, _) :\\ t) :^ bi) = isL1 (t :^ bi)
+isL1 (L b@((1, _) :\\ _) :^ bi) = Just (b :^ bi)
+isL1 (L ((n, ai) :\\ t) :^ bi) =
+  Just (((1, ci) :\\ ld (((n - 1), di) :\\ t)) :^ bi) where
+  (ci, di) = bouts (n - 1) ai
+
+isL1 _ = Nothing
+
+type Cx = Bwd (Re (Bn TC))
+
+data Share x = Share {changed :: !Bool, value :: x}
+
+instance Applicative Share where
+  pure x = Share False x
+  Share cf f <*> Share cs s = Share (cf || cs) (f s)
+
+instance Functor Share where
+  fmap f (Share c x) = Share c (f x)
+
+share :: t -> Share t -> Share t
+share t (Share b t') = Share b (if b then t' else t)
+
+new :: t -> Share t
+new = Share True
+
+rnfC :: Cx -> Re TC -> Share (Re TC)
+rnfC g z@(t :^ bi) = share z $ case t of
+  I t  -> fmap I <$> rnfC g (t :^ bi)
+  P st -> case prjR (st :^ bi) of
+    (s, t) -> fmap P <$> (pR <$> rnfC g s <*> rnfC g t)
+  E e  -> upsilon <$> fst (rnfE g (e :^ bi))
+  _ -> pure z
+
+rnfE :: Cx -> Re TE -> (Share (Re TE), Re TC)
+rnfE g z@(e :^ bi) = (share z *** id) $ case e of
+  T tty -> case prjR (tty :^ bi) of
+    (t, ty) -> let ty' = rnfC g ty
+               in  (fmap T <$> (pR <$> rnfC g t <*> ty'), value ty')
+  X vs -> case prjR (vs :^ bi) of
+    (() :^ x, sz) -> case x <?? g of
+      B0 :\ pty ->
+        let ty = value (rnfC g (stan pty sz))
+        in  (pure z, ty)
+  Z es -> case prjR (es :^ bi) of
+    (e, s) -> elim g (rnfE g e) s
+
+radR :: Re TC -> Re TC -> Re TE
+radR t tT = fmap T (pR t tT)
+
+elim :: Cx -> (Share (Re TE), Re TC) -> Re TC -> (Share (Re TE), Re TC)
+elim g (e, ty) s = flip (,) ty' $ case isCan ty of
+    Just ("Pi", [sS, tT])
+      | Just (f, _) <- isRad (value e), Just bt <- isL1 f ->
+         new (radR (stan bt (tTspine s sS)) ty')
+    _ -> fmap Z <$> (pR <$> e <*> pure s)
+  where
+    ty' = elimTy g (value e, ty) s
+
+elimTy :: Cx -> (Re TE, Re TC) -> Re TC -> Re TC
+elimTy g (e, ty) s = case isCan ty of
+  Just ("Pi", [sS, tT]) | Just tTb <- isL1 tT ->
+    stan tTb (tTspine s sS)
+
+tTspine :: Re TC -> Re TC -> Re (Sp (Bn TE))
+tTspine s sS = fmap SZ (pR (kR S0) (0 \\ radR s sS))
+
+isRad :: Re TE -> Maybe (Re TC, Re TC)
+isRad (T tT :^ bi) = pure (prjR (tT :^ bi))
+isRad _ = Nothing
+
+isList :: Re TC -> Maybe [Re TC]
+isList (V :^ _) = pure []
+isList (P st :^ bi) = case prjR (st :^ bi) of
+  (s, t) -> (s :) <$> isList t
+
+isCan :: Re TC -> Maybe (A, [Re TC])
+isCan (I (P ct) :^ bi) = case prjR (ct :^ bi) of
+  (A x :^ _, t) -> (,) x <$> isList t
+  _ -> Nothing
+isCan _ = Nothing
