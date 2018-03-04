@@ -37,3 +37,15 @@ metavariable instantiation in construction by refinement.
 
 *symbol* ::= `_` | `-` | `<` | `=` | `>` | `*` | `'`
 
+Atoms are used both as tags in constructions and as variables in
+eliminations. Brackets `[`..`]` mark the unrolling of syntactic
+fixpoints, and they typically contain right-nested null-terminated
+sequences of pairs, often with an atom at their head. Types, in
+particular, take that form. Abstractions, `\` *x* *t*, do not need
+parentheses, because they abstract exactly one variable and there
+are enough delimiters around to avoid ambiguity.
+
+Function types look like
+
+    [Pi {S} \ s {T {s}}]
+
