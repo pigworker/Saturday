@@ -104,9 +104,9 @@ means 'move the next bit from &theta;'.
 
 We then do a lot of work with the type of *relevant* things
 
-     data Re x = x :^ OPE deriving Show
+     data Re t = t :^ OPE deriving Show
 
-where *x* `:^` &theta; is intended to store *x*s which are sure to
+where *t* `:^` &theta; is intended to store *t*s which are sure to
 use all of the variables that &theta; has not thrown away.
 
 The crucial data structure is the *pair relevant*
@@ -127,4 +127,78 @@ This construction is exactly what we need to compute relevant pairing:
     pR :: Re s -> Re t -> Re (PR s t)
     pR (s :^ ai) (t :^ bi) = (s :^ ai', t :^ bi') :^ (ai .|. bi) where
       (ai', bi') = psh ai bi
+
+Constants embed directly, with no variables relevant.
+    
+    kR :: t -> Re t
+    kR t = t :^ oe
+
+A *spine* is a snoc-list made by relevant pairing.
+
+    data Sp x = S0 | SZ (PR (Sp x) x) deriving Show
+
+We may compute a backward list of relevant things from a relevant
+spine
+
+    unSp :: Re (Sp x) -> Bwd (Re x)
+    unSp (S0 :^ _)           = B0
+    unSp (SZ (xz, x) :^ ci)  = unSp (xz ^<< ci) :\ (x ^<< ci)
+
+where the `^<<` operator post-composes a thinning
+
+    (^<<) :: Re t -> OPE -> Re t
+    (t :^ ai) ^<< bi = t :^ (ai << bi)
+
+without touching the underlying thing.
+
+Variables are trivial, because by the time you use one, there should
+be only one variable in scope.
+
+    xR :: Int -> Re ()
+    xR i = () :^ bit i
+
+To construct bindings, we must say *how many* variables are bound,
+then immediately, *which* are relevant.
+
+    data Bn t =  (Int, OPE) :\\ t deriving Show
+
+We may then define the simultaneous abstraction:
+
+    (\\) :: Int -> Re t -> Re (Bn t)
+    n \\ (t :^ ci) = ((n, bi) :\\ t) :^ ai where (ai, bi) = bouts n ci
+
+where `bouts` *n* is the operation that comes out from under *n*
+binders, splitting a thinning into its free and bound components.
+
+    bouts :: Int -> OPE -> (OPE, OPE)
+    bouts n i = (shiftR i n, i .&. (2 ^ n - 1))
+
+With constants and pairing, abstraction and usage, we have all the
+tools to build syntax trees.
+
+
+## Abstract Syntax
+
+The file [Tm.hs](src/Tm.hs) contains the definition of the abstract
+syntax, and pretty much the rest of the workings (so it is sure to
+get split in due course).
+
+Constructions are as follows,
+
+    data TC
+      = A A           -- atom                                 a
+      | V             -- void                                 ()
+      | P (PR TC TC)  -- pair                                 (car cdr..)
+      | I TC          -- inductive wrapping                   [stuff..]
+      | L (Bn TC)     -- lambda, never nullary, never nested
+      | E TE          -- elimination                          {elim..}
+      deriving Show
+
+defined mutually with eliminations
+
+    data TE
+      = X (PR () (Sp (Bn TE)))   -- use of variable, with spine of parameters
+      | Z (PR TE TC)             -- zapping something with an eliminator
+      | T (PR TC TC)             -- type annotation   {term : Type}
+      deriving Show
 

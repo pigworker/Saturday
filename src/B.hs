@@ -69,7 +69,7 @@ bi   <?? (xz :\ x) = if b then yz :\ x else yz where
   (ai, b) = bout bi
   yz = ai <?? xz
 
-data Re x = x :^ OPE deriving Show
+data Re t = t :^ OPE deriving Show
 
 instance Functor Re where
   fmap f (t :^ bi) = f t :^ bi
@@ -77,8 +77,8 @@ instance Functor Re where
 (^<<) :: Re t -> OPE -> Re t
 (t :^ ai) ^<< bi = t :^ (ai << bi)
 
-kR :: x -> Re x
-kR x = x :^ oe
+kR :: t -> Re t
+kR t = t :^ oe
 
 jR :: Re (Re t) -> Re t
 jR ((t :^ ai) :^ bi) = t :^ (ai << bi)
@@ -114,8 +114,8 @@ body (((n, bi) :\\ t) :^ ai) = t :^ bins ai n bi
 data Sp x = S0 | SZ (PR (Sp x) x) deriving Show
 
 unSp :: Re (Sp x) -> Bwd (Re x)
-unSp (S0 :^ _) = B0
-unSp (SZ (xz, x) :^ ci) = unSp (xz ^<< ci) :\ (x ^<< ci)
+unSp (S0 :^ _)           = B0
+unSp (SZ (xz, x) :^ ci)  = unSp (xz ^<< ci) :\ (x ^<< ci)
 
 (-\) :: Re (Sp x) -> Re x -> Re (Sp x)
 xz -\ x = fmap SZ (pR xz x)
