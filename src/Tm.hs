@@ -141,53 +141,35 @@ isL1 _ = Nothing
 
 type Cx = Bwd (Re (Bn TC))
 
-data Share x = Share {changed :: !Bool, value :: x}
-
-instance Applicative Share where
-  pure x = Share False x
-  Share cf f <*> Share cs s = Share (cf || cs) (f s)
-
-instance Functor Share where
-  fmap f (Share c x) = Share c (f x)
-
-share :: t -> Share t -> Share t
-share t (Share b t') = Share b (if b then t' else t)
-
-new :: t -> Share t
-new = Share True
-
-rnfC :: Cx -> Re TC -> Share (Re TC)
-rnfC g z@(t :^ bi) = share z $ case t of
-  I t  -> fmap I <$> rnfC g (t :^ bi)
+rnfC :: Cx -> Re TC -> Re TC
+rnfC g z@(t :^ bi) = case t of
+  I t  -> fmap I (rnfC g (t :^ bi))
   P st -> case prjR (st :^ bi) of
-    (s, t) -> fmap P <$> (pR <$> rnfC g s <*> rnfC g t)
-  E e  -> upsilon <$> fst (rnfE g (e :^ bi))
-  _ -> pure z
+    (s, t) -> fmap P (pR (rnfC g s) (rnfC g t))
+  E e  -> upsilon (fst (rnfE g (e :^ bi)))
+  _ -> z
 
-rnfE :: Cx -> Re TE -> (Share (Re TE), Re TC)
-rnfE g z@(e :^ bi) = (share z *** id) $ case e of
+rnfE :: Cx -> Re TE -> (Re TE, Re TC)
+rnfE g z@(e :^ bi) = case e of
   T tty -> case prjR (tty :^ bi) of
     (t, ty) -> let ty' = rnfC g ty
-               in  (fmap T <$> (pR <$> rnfC g t <*> ty'), value ty')
+               in  (radR (rnfC g t) ty', ty')
   X vs -> case prjR (vs :^ bi) of
     (() :^ x, sz) -> case x <?? g of
-      B0 :\ pty ->
-        let ty = value (rnfC g (stan pty sz))
-        in  (pure z, ty)
+      B0 :\ pty -> (z, rnfC g (stan pty sz))
   Z es -> case prjR (es :^ bi) of
     (e, s) -> elim g (rnfE g e) s
 
 radR :: Re TC -> Re TC -> Re TE
 radR t tT = fmap T (pR t tT)
 
-elim :: Cx -> (Share (Re TE), Re TC) -> Re TC -> (Share (Re TE), Re TC)
-elim g (e, ty) s = flip (,) ty' $ case isCan ty of
-    Just ("Pi", [sS, tT])
-      | Just (f, _) <- isRad (value e), Just bt <- isL1 f ->
-         new (radR (stan bt (tTspine s sS)) ty')
-    _ -> fmap Z <$> (pR <$> e <*> pure s)
+elim :: Cx -> (Re TE, Re TC) -> Re TC -> (Re TE, Re TC)
+elim g z@(e, ty) s = flip (,) ty' $ case isCan ty of
+    Just ("Pi", [sS, tT]) | Just (f, _) <- isRad e, Just bt <- isL1 f ->
+      radR (stan bt (tTspine s sS)) ty'
+    _ -> fmap Z (pR e s)
   where
-    ty' = elimTy g (value e, ty) s
+    ty' = elimTy g z s
 
 elimTy :: Cx -> (Re TE, Re TC) -> Re TC -> Re TC
 elimTy g (e, ty) s = case isCan ty of
