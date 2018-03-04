@@ -49,3 +49,15 @@ Function types look like
 
     [Pi {S} \ s {T {s}}]
 
+Universes look like
+
+    [Type {sort}]
+
+The joy of LISP is that I can add stuff to the language without
+changing its concrete syntax. Or rather, the *actual* concrete
+syntax is how you make stuff out of the LISP-like components.
+
+There is an
+[attoparsec](https://hackage.haskell.org/package/attoparsec-0.13.2.2/docs/Data-Attoparsec-Text.html)
+parser for this syntax in the engigmatically named [R.hs](src/R.hs)
+file.
