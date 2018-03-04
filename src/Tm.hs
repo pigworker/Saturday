@@ -147,7 +147,7 @@ rnfE g z@(e :^ bi) = case e of
     (() :^ x, sz) -> case x <?? g of
       B0 :\ pty -> (z, rnfC g (stan pty sz))
   Z es -> case prjR (es :^ bi) of
-    (e, s) -> elim g (rnfE g e) s
+    (e, s) -> elim g (rnfE g e) (rnfC g s)
 
 radR :: Re TC -> Re TC -> Re TE
 radR t tT = fmap T (pR t tT)

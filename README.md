@@ -353,3 +353,90 @@ only those which are used in the image). Of course, if there are no
 parameters (or none are used), then `t` will not be traversed.
 
 
+## Root Normal Form
+
+I call a type a *Geuvers* type if reducing its expressions to
+canonical or neutral is a sound and complete test for whether they are
+judgmentally equal to a canonical form. That is, in a Geuvers type,
+we don't need to do anything clever to reveal a canonical root node:
+we just compute. Typechecking algorithms rely on sorts (types of
+types) being Geuvers types.
+
+Because I build syntax out of LISP, I choose to work a little harder
+than weak-head-normalization: I keep computing until I reach a binder,
+but I don't go under. I call this *root-normalization*. It's (more
+than) enough to reveal head type constructors and all their children,
+assuming types are Geuvers.
+
+The core recursion is between 
+
+    rnfC :: Cx -> Re TC -> Re TC
+    rnfE :: Cx -> Re TE -> (Re TE, Re TC)
+
+where the latter does type reconstruction, which is why both need to
+know the *context*. However, `rnfC` does *not* need to know the *type*
+of the thing being reduced exactly because we do not go under binders,
+so we need never *extend* the context.
+
+Now, there is something funny going on. If we were doing only
+&beta;-reduction, we would not even need to do type reconstruction,
+because the bidirectional discipline ensures that every &beta;-redex
+makes the active type *explicit*: we do not need to reconstruct the
+types of neutral terms exactly because they're not going to compute
+anyway. However, some type theories (notably, *cubical* type theories)
+have reduction rules which eliminate neutral terms to canonical values
+when their *types* tell us enough information (e.g., projecting an
+*endpoint* from a path whose type specifies the values at the ends).
+Type reconstruction for eliminations is not hard, and if we want such
+type-directed behaviour, we have to do it to stay Geuvers.
+
+
+## Type Checking and Synthesis
+
+For constructions, we have
+
+    chk :: Cx        -- context
+        -> Re TC     -- type to check, already in rnf
+        -> Re TC     -- candidate inhabitant
+        -> Maybe ()  -- well, did ya?
+
+and for eliminations
+
+    syn :: Cx              -- context
+        -> Re TE           -- elimination for which to synthesize type
+        -> Maybe (Re TC)   -- synthesized type in rnf
+
+We have to be careful to enforce the rnf invariants (or else the
+typechecker will reject valid things for want of a little elbow
+grease). Where we `E`mbed eliminations into constructions, we have
+a clearly directed type comparison to do: the type we've got meets
+the type we want, so there is an opportunity for subtyping (which I
+propose to use for *cumulativity*, at least).
+
+    subtype :: Cx        -- context
+            -> Re TC     -- candidate subtype in rnf
+            -> Re TC     -- candidate supertype in rnf
+            -> Maybe ()  -- well, did ya?
+
+Canonical type constructors have structural rules imposing suitable
+co- or contravariant conditions on their children. For stuck
+eliminations, we revert to an equality test. We have
+type-reconstructing equality for eliminations
+
+    qE :: Cx             -- context
+       -> Re TE          -- e the first in rnf
+       -> Re TE          -- e the second in rnf
+       -> Maybe (Re TC)  -- are they equal with a synthesized type in rnf
+
+and type-directed equality for constructions
+
+    qC :: Cx           -- context
+       -> Re TC        -- type in rnf
+       -> Re TC        -- t the first in rnf
+       -> Re TC        -- t the second in rnf
+       -> Maybe ()     -- well, were they?
+
+which allows us to impose &eta;-laws wherever convenient, and
+certainly for functions. &eta;-expansion is easy in co-de-Bruijn
+syntax because thinning is laughably cheap.
+
