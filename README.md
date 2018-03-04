@@ -188,9 +188,9 @@ Constructions are as follows,
     data TC
       = A A           -- atom                                 a
       | V             -- void                                 ()
-      | P (PR TC TC)  -- pair                                 (car cdr..)
+      | P (PR TC TC)  -- pair                                 (car, cdr)
       | I TC          -- inductive wrapping                   [stuff..]
-      | L (Bn TC)     -- lambda, never nullary, never nested
+      | L (Bn TC)     -- lambda, never nullary, never nested  \ x t
       | E TE          -- elimination                          {elim..}
       deriving Show
 
