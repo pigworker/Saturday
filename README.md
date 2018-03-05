@@ -116,6 +116,23 @@ end) as instructions for processing &theta; from the little end
 to construct the composite: 0 means 'insert 0, retaining &theta;', 1
 means 'move the next bit from &theta;'.
 
+    (<<) :: OPE -> OPE -> OPE
+    ai << (-1) = ai
+    ai << 0    = oe
+    (-1) << bi = bi
+    0    << bi = oe
+    ai << bi     = case bout bi of
+      (bi, False)  -> o' (ai << bi)
+      (bi, True)   -> case bout ai of
+        (ai, a) -> (ai << bi) <\ a
+
+    bout :: OPE -> (OPE, Bool)
+    bout i = (shiftR i 1, testBit i 0)
+
+    (<\) :: OPE -> Bool -> OPE
+    i <\ False  = shiftL i 1
+    i <\ True   = shiftL i 1 .|. bit 0
+
 We then do a lot of work with the type of *relevant* things
 
     data Re t = t :^ OPE deriving Show
